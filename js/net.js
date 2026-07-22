@@ -10,11 +10,23 @@
 //
 // The library is vendored into /vendor, so nothing is fetched from a CDN.
 
-import { joinRoom, selfId } from '../vendor/trystero-torrent.min.js';
+import { joinRoom, selfId } from '../vendor/trystero-nostr.min.js';
 
 // Namespaces this app on the shared public signaling infrastructure. The table
 // code namespaces further, so two different tables never see each other.
 const APP_ID = 'pushup-poker-v1-x7k2f9';
+
+// Public Nostr relays used only to exchange the initial WebRTC handshake (a few
+// tiny messages). Reliable and reachable on wifi and cell; no account needed.
+// Several are listed for redundancy — if some are down, the rest still work.
+const RELAY_URLS = [
+  'wss://relay.damus.io',
+  'wss://nos.lol',
+  'wss://relay.nostr.band',
+  'wss://relay.primal.net',
+  'wss://nostr.mom',
+  'wss://relay.snort.social',
+];
 
 // Free public STUN servers (no account). Used only to discover each peer's
 // public address for the direct WebRTC connection.
@@ -31,7 +43,10 @@ export const mySelfId = selfId;
 // Open (or create) the room for `code`. Returns a handle with typed send/receive
 // helpers plus peer-presence hooks.
 export function openRoom(code) {
-  const room = joinRoom({ appId: APP_ID, rtcConfig: RTC_CONFIG }, String(code).toUpperCase());
+  const room = joinRoom(
+    { appId: APP_ID, relayUrls: RELAY_URLS, rtcConfig: RTC_CONFIG },
+    String(code).toUpperCase(),
+  );
 
   const [sendState, getState] = room.makeAction('state');
   const [sendHole, getHole] = room.makeAction('hole');

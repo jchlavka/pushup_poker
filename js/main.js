@@ -119,8 +119,8 @@ function startHost(code, myName) {
 
   room.onJoin((info, peer) => { E.addPlayer(G, peer, (info && info.name) || 'Player'); broadcast(); });
   room.onAct((action, peer) => dispatch(peer, action));
-  room.onPeerJoin((peer) => { room.sendState(E.publicView(G), peer); });
-  room.onPeerLeave((peer) => { E.setConnected(G, peer, false); broadcast(); });
+  room.onPeerJoin((peer) => { console.log('[pushup] peer joined', peer, '— sending table state'); room.sendState(E.publicView(G), peer); });
+  room.onPeerLeave((peer) => { console.log('[pushup] peer left', peer); E.setConnected(G, peer, false); broadcast(); });
 
   current = { leave: () => room.leave() };
   draw();
@@ -133,14 +133,23 @@ function startClient(code, myName) {
   const room = openRoom(code);
   let view = null;
   let hole = null;
-  let announced = false;
+  let peers = 0;
+  let seconds = 0;
+  let ticker = setInterval(() => { seconds += 1; if (!view) draw(); }, 1000);
+  const stopTicker = () => { if (ticker) { clearInterval(ticker); ticker = null; } };
 
   const draw = () => {
     if (!view) {
-      root.innerHTML = `<div class="wrap"><div class="panel"><h2>Joining ${code}…</h2>
-        <p class="muted">Connecting to the table. This can take a few seconds.</p>
+      const status = peers > 0
+        ? 'Found the table — syncing your seat…'
+        : 'Searching for the table over the network…';
+      const hint = seconds > 20 && peers === 0
+        ? `<p class="muted small">Still searching after ${seconds}s. Double-check the code, make sure the host still has the tab open, and try refreshing. On a very locked-down wifi, try phone data.</p>`
+        : `<p class="muted small">${seconds}s — this usually takes a few seconds.</p>`;
+      root.innerHTML = `<div class="wrap"><div class="panel"><h2>Joining table ${code}…</h2>
+        <p>${status}</p>${hint}
         <button id="back" class="btn ghost">Back</button></div></div>`;
-      root.querySelector('#back').addEventListener('click', renderHome);
+      root.querySelector('#back').addEventListener('click', () => { stopTicker(); renderHome(); });
       return;
     }
     render(root, { view, myId: room.selfId, myHole: hole, isHost: false, handlers });
@@ -149,15 +158,15 @@ function startClient(code, myName) {
   const handlers = {
     onAction: (a) => room.sendAct(a),
     onConfirm: () => room.sendAct({ type: 'confirm' }),
-    onLeave: () => renderHome(),
+    onLeave: () => { stopTicker(); renderHome(); },
   };
 
-  room.onState((v) => { view = v; draw(); });
+  room.onState((v) => { view = v; stopTicker(); draw(); });
   room.onHole((cards) => { hole = cards; draw(); });
-  room.onPeerJoin(() => { room.sendJoin({ name: myName }); announced = true; });
-  // If we don't hear anything for a while, keep re-announcing on any state.
+  room.onPeerJoin((peer) => { peers += 1; console.log('[pushup] peer joined', peer, '— announcing name'); room.sendJoin({ name: myName }); draw(); });
+  room.onPeerLeave((peer) => { peers = Math.max(0, peers - 1); console.log('[pushup] peer left', peer); draw(); });
 
-  current = { leave: () => room.leave() };
+  current = { leave: () => { stopTicker(); room.leave(); } };
   draw();
 }
 
