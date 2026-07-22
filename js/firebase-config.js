@@ -17,11 +17,13 @@
 // The `databaseURL` line is the important one — make sure it's filled in.
 
 export const firebaseConfig = {
-  apiKey: 'PASTE_HERE',
-  authDomain: 'PASTE_HERE',
-  databaseURL: 'PASTE_HERE', // e.g. https://pushup-poker-default-rtdb.firebaseio.com
-  projectId: 'PASTE_HERE',
-  appId: 'PASTE_HERE',
+  apiKey: "AIzaSyDpScFVl50yNEQLsx4X2fDLWELTJ76plFg",
+  authDomain: "pushup-poker.firebaseapp.com",
+  databaseURL: "https://pushup-poker-default-rtdb.firebaseio.com",
+  projectId: "pushup-poker",
+  storageBucket: "pushup-poker.firebasestorage.app",
+  messagingSenderId: "966794496301",
+  appId: "1:966794496301:web:c73270625f7179c97e6ba4"
 };
 
 // Leave this alone. (Used only for local testing against the Firebase emulator.)
