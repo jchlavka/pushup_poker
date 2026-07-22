@@ -103,6 +103,7 @@ export function startHand(G, rng = Math.random) {
     actingIdx: -1,
     reveal: {},
     winByFold: false,
+    awaitingReveal: false, // paused, waiting for host to deal the next street
     blindSeat: (button + 1) % seats.length,
   };
   G.hand = h;
@@ -239,37 +240,58 @@ function dealBoard(G, count) {
   for (let i = 0; i < count; i++) h.board.push(h.deck.pop());
 }
 
+function openStreet(G) {
+  const h = G.hand;
+  const next = STREETS[STREETS.indexOf(h.phase) + 1];
+  if (next === 'flop') dealBoard(G, 3);
+  else dealBoard(G, 1);
+  h.phase = next;
+  h.inc = streetIncrement(next);
+  h.betsMade = 0;
+  h.lastAggressor = null;
+  // Everyone active owes action; first to act is left of the button.
+  h.pending = {};
+  for (const id of activeSeatIds(h)) if (canActId(h, id)) h.pending[id] = true;
+  h.actingIdx = (h.button + 1) % h.seats.length;
+  advanceToActable(G);
+}
+
 function closeStreet(G) {
   const h = G.hand;
-  const phaseIdx = STREETS.indexOf(h.phase);
+  const nextPhase = STREETS[STREETS.indexOf(h.phase) + 1];
+  // More than one player can still act -> a real betting round follows.
+  const canStillBet = activeSeatIds(h).filter((id) => canActId(h, id)).length > 1;
 
-  // If at most one player can still act, run the rest of the board out with no
-  // further betting.
-  const runOut = activeSeatIds(h).filter((id) => canActId(h, id)).length <= 1;
-
-  let next = STREETS[phaseIdx + 1];
-  while (next && next !== 'showdown') {
-    if (next === 'flop') dealBoard(G, 3);
-    else dealBoard(G, 1);
-    h.phase = next;
-    h.inc = streetIncrement(next);
-    h.betsMade = 0;
-    h.lastAggressor = null;
-    if (!runOut) {
-      // Open the new street: everyone active owes action, first to act is left
-      // of the button.
-      h.pending = {};
-      for (const id of activeSeatIds(h)) if (canActId(h, id)) h.pending[id] = true;
-      h.actingIdx = (h.button + 1) % h.seats.length;
-      advanceToActable(G);
-      return;
-    }
-    // else: keep dealing to showdown
-    next = STREETS[STREETS.indexOf(next) + 1];
+  if (canStillBet && nextPhase !== 'showdown') {
+    openStreet(G);
+    return;
   }
-  // Reached showdown.
-  h.phase = 'showdown';
-  finishHand(G);
+  if (h.board.length >= 5) {
+    // River betting is done -> straight to the reveal.
+    h.phase = 'showdown';
+    finishHand(G);
+    return;
+  }
+  // No more betting possible (e.g. everyone capped at the ceiling). Pause and
+  // let the host deal the remaining board one street at a time (slow roll).
+  h.awaitingReveal = true;
+}
+
+// Host-driven: deal the next community card(s), or, once the board is complete,
+// go to showdown. Only valid while paused in a run-out (awaitingReveal).
+export function advanceReveal(G) {
+  const h = G.hand;
+  if (!h || G.status !== 'hand' || !h.awaitingReveal) return { ok: false };
+  if (h.board.length >= 5) {
+    h.awaitingReveal = false;
+    h.phase = 'showdown';
+    return finishHand(G);
+  }
+  if (h.board.length === 0) { dealBoard(G, 3); h.phase = 'flop'; }
+  else if (h.board.length === 3) { dealBoard(G, 1); h.phase = 'turn'; }
+  else { dealBoard(G, 1); h.phase = 'river'; }
+  h.awaitingReveal = true; // stay paused for the next reveal / showdown
+  return { ok: true };
 }
 
 // ---- resolution / settlement ----
@@ -374,6 +396,7 @@ export function publicView(G) {
       folded: { ...h.folded },
       acting: h.seats[h.actingIdx],
       maxBets: MAX_BETS_PER_ROUND,
+      awaitingReveal: h.awaitingReveal,
     };
   }
   if (G.status === 'settle' && G.settle) {

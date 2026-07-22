@@ -140,6 +140,21 @@ function actionPanelHtml(view, myId) {
   return `<div class="panel action"><div class="btn-row">${btns.join('')}</div>${raiseUi}</div>`;
 }
 
+function revealPanelHtml(h, isHost) {
+  const n = h.board.length;
+  const label = n === 0 ? 'Deal the flop' : n === 3 ? 'Deal the turn' : n === 4 ? 'Deal the river' : 'Show the winner';
+  if (isHost) return `<div class="panel action"><div class="btn-row"><button class="btn primary big" data-reveal="1">${label} 🃏</button></div></div>`;
+  return `<div class="panel action wait"><p class="muted">Everyone’s all in — waiting for the host to ${label.toLowerCase()}…</p></div>`;
+}
+
+function middlePanelHtml(view, myId, isHost) {
+  const h = view.hand;
+  if (h.awaitingReveal) return revealPanelHtml(h, isHost);
+  if (!h.seats.includes(myId)) return '';
+  if (h.folded[myId]) return '<div class="panel action wait"><p class="muted">You folded.</p></div>';
+  return actionPanelHtml(view, myId);
+}
+
 function renderTable(root, ctx) {
   const { view, myId, myHole, isHost, handlers } = ctx;
   const h = view.hand;
@@ -163,13 +178,15 @@ function renderTable(root, ctx) {
         <div class="myhand-label">${inThisHand ? 'Your cards' : 'You’re sitting out this hand'}</div>
         <div class="cards">${inThisHand ? hole : ''}</div>
       </div>
-      ${inThisHand && !h.folded[myId] ? actionPanelHtml(view, myId) : (inThisHand ? '<div class="panel action wait"><p class="muted">You folded.</p></div>' : '')}
+      ${middlePanelHtml(view, myId, isHost)}
       ${leaderboardHtml(view.players)}
       ${isHost ? '<div class="host-mini">'
-        + (h.acting && h.acting !== myId ? `<button id="forceFold" class="btn ghost small">Force-fold ${esc((view.players.find((p) => p.id === h.acting) || {}).name || 'player')} (if stuck/away)</button>` : '')
+        + (!h.awaitingReveal && h.acting && h.acting !== myId ? `<button id="forceFold" class="btn ghost small">Force-fold ${esc((view.players.find((p) => p.id === h.acting) || {}).name || 'player')} (if stuck/away)</button>` : '')
         + '<button id="toggleMode" class="btn ghost small">Switch to ' + (view.mode === MODE.NOLIMIT ? 'Limit' : 'No-limit') + ' (next hand)</button></div>' : ''}
     </div>`;
 
+  const revealBtn = root.querySelector('[data-reveal]');
+  if (revealBtn) revealBtn.addEventListener('click', () => handlers.onReveal && handlers.onReveal());
   root.querySelectorAll('[data-act]').forEach((b) => {
     b.addEventListener('click', () => {
       const act = b.getAttribute('data-act');

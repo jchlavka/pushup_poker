@@ -127,6 +127,7 @@ function startHost(code, myName) {
   }
   function dispatch(peerId, action) {
     if (action.type === 'confirm') { E.confirmPushups(G, peerId); broadcast(); return; }
+    if (action.type === 'reveal') { if (peerId === mySelfId) { E.advanceReveal(G); broadcast(); } return; }
     if (['fold', 'check', 'call', 'bet', 'raise'].includes(action.type)) {
       E.applyAction(G, peerId, action); // out-of-turn / illegal is ignored inside
       broadcast();
@@ -138,6 +139,7 @@ function startHost(code, myName) {
     onSetMode: (m) => { E.setMode(G, m); broadcast(); },
     onAction: (a) => dispatch(mySelfId, a),
     onConfirm: () => dispatch(mySelfId, { type: 'confirm' }),
+    onReveal: () => dispatch(mySelfId, { type: 'reveal' }),
     onForceFold: () => { if (G.hand) dispatch(G.hand.seats[G.hand.actingIdx], { type: 'fold' }); },
     onLeave: () => renderHome(),
   };
@@ -215,6 +217,7 @@ function startSolo(n) {
     onDeal: () => { const r = E.startHand(G); if (!r.ok) toast(r.error); draw(); },
     onSetMode: (m) => { E.setMode(G, m); draw(); },
     onAction: (a) => { const id = G.hand.seats[G.hand.actingIdx]; E.applyAction(G, id, a); draw(); },
+    onReveal: () => { E.advanceReveal(G); draw(); },
     onForceFold: () => { if (G.hand) { E.applyAction(G, G.hand.seats[G.hand.actingIdx], { type: 'fold' }); draw(); } },
     onConfirm: () => { for (const id of G.settle ? Object.keys(G.settle.owed) : []) E.confirmPushups(G, id); draw(); },
     onLeave: () => { location.search = ''; },
