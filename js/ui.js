@@ -123,7 +123,7 @@ function actionPanelHtml(view, myId) {
   const btns = [];
   btns.push('<button class="btn danger" data-act="fold">Fold</button>');
   if (legal.check) btns.push('<button class="btn" data-act="check">Check</button>');
-  if (legal.call) btns.push(`<button class="btn primary" data-act="call">Call ${legal.call.amount}</button>`);
+  if (legal.call) btns.push(`<button class="btn primary" data-act="call">Call ${legal.call.to}</button>`);
   const rr = legal.bet || legal.raise;
   const label = legal.bet ? 'Bet' : 'Raise to';
   let raiseUi = '';
@@ -157,7 +157,6 @@ function renderTable(root, ctx) {
       </div>
       <div class="felt">
         <div class="board">${board || '<span class="muted">— board —</span>'}</div>
-        <div class="pot">Pot: <strong>${h.pot}</strong> pushups</div>
       </div>
       <div class="seats">${seats}</div>
       <div class="myhand">
@@ -247,7 +246,6 @@ function renderSettle(root, ctx) {
         <h2>${s.winByFold ? 'Everyone folded to' : 'Winner:'} ${esc(winnerNames)} 🏆</h2>
         <div class="board small">${board || ''}</div>
         <div class="reveals">${reveals || '<p class="muted">(won on a fold — cards not shown)</p>'}</div>
-        <p class="pot-line">Pot was ${s.pot} pushups.</p>
       </div>
       ${myPanel}
       <div class="panel confirm-status">
