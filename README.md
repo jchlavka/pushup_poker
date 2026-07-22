@@ -3,8 +3,9 @@
 Texas Hold'em where the chips are **pushups**. Nothing to win — when a hand ends,
 **everyone except the winner immediately does the pushups they put in the pot**
 (fold early, do fewer). The site keeps a running session leaderboard of pushups
-done. Play on your own phones/laptops, no accounts, no server — it runs entirely
-from a static page over a direct peer-to-peer connection.
+done. Play on your own phones/laptops. The site itself is hosted free on GitHub
+Pages; game data syncs through a free Firebase backend (no server for you to run,
+and no accounts for your friends).
 
 ## The rules
 
@@ -20,41 +21,70 @@ from a static page over a direct peer-to-peer connection.
   **exactly what they put in**. Tap **Done** to confirm your pushups; the next hand deals
   once everyone has confirmed.
 
+## Set up the free Firebase backend (one time, ~5 min, only you)
+
+The game talks through **Firebase Realtime Database** — a free Google service that
+relays the messages. This works on any wifi/cell network (unlike a direct
+peer-to-peer connection, which fails on many networks). Your friends never make an
+account; only you do this setup, once.
+
+1. Go to **[console.firebase.google.com](https://console.firebase.google.com)** and
+   **Add project** (any name, e.g. `pushup-poker`). You can turn Google Analytics off.
+2. In the left sidebar: **Build → Realtime Database → Create Database**. Pick a
+   location, and choose **Start in test mode**.
+3. On the Realtime Database page, note the URL at the top — it looks like
+   `https://pushup-poker-default-rtdb.firebaseio.com`. That's your `databaseURL`.
+4. Go to **Project settings** (gear icon) → scroll to **Your apps** → click the
+   **`</>` (Web)** icon to register a web app (any nickname, **no** Firebase Hosting
+   needed). Firebase shows a `const firebaseConfig = { ... }` snippet.
+5. Open **`js/firebase-config.js`** in this repo and paste the values from that
+   snippet into the object (make sure `databaseURL` is filled in — if it's not in
+   the snippet, use the URL from step 3).
+6. **Keep it working past 30 days:** test mode locks the database after 30 days. In
+   Realtime Database → **Rules**, set the rules to this and **Publish**:
+
+   ```json
+   { "rules": { ".read": true, ".write": true } }
+   ```
+
+7. Commit and push (`git add -A && git commit -m "add firebase config" && git push`).
+
+That's it — the site is now fully working for everyone.
+
+> **Privacy note (honor system):** with the simple public rules above, your own hole
+> cards are only ever shown to you in the app, but a *technically-inclined* friend
+> could open the Firebase console and peek at the raw data. For a friendly pushup
+> game that's usually fine. If you want it locked down so cards are cryptographically
+> private, that's a follow-up (Firebase Anonymous Auth + per-user rules) — ask and it
+> can be added.
+
+## Host it on GitHub Pages (free)
+
+1. Put these files in a **public** GitHub repo (keep the folder layout) and push to `main`.
+2. Repo **Settings → Pages → Build and deployment → Deploy from a branch →** `main` / `/ (root)`.
+3. Wait a minute; your site is live at `https://<your-username>.github.io/<repo>/`.
+4. Share that URL. The included empty `.nojekyll` file makes Pages serve `/vendor` and
+   `/js` verbatim.
+
 ## Play it
 
 1. One person clicks **Create a table** and shares the 4-letter code (or the link).
 2. Everyone else opens the site, enters a name, and **Joins** with the code.
 3. The host clicks **Deal**. Your two cards are sent only to you.
 
-> Connection note: peers find each other over free public infrastructure and connect
-> directly (WebRTC + public STUN). This works on the vast majority of home/phone
-> networks. On a very locked-down wifi (some corporate/university networks) a peer may
-> fail to connect — try phone data or a different network. There are no accounts and
-> nothing to host or pay for.
-
-## Host it on GitHub Pages (free, no accounts beyond GitHub)
-
-1. Create a new **public** GitHub repo and add all these files (keep the folder layout).
-2. Push to the `main` branch.
-3. Repo **Settings → Pages → Build and deployment → Deploy from a branch →** `main` / `/ (root)`.
-4. Wait a minute; your site is live at `https://<your-username>.github.io/<repo>/`.
-5. Share that URL. Everything (including the P2P library in `/vendor`) is served from Pages.
-
-The included empty `.nojekyll` file tells GitHub Pages to serve `/vendor` and `/js`
-verbatim (no Jekyll processing).
+Everyone will see a live "Found the table — syncing…" and land in the lobby within a
+second or two.
 
 ## Test / develop without friends
 
-- **Hotseat dev mode:** open `index.html?solo=4` (or `?solo=2..8`). One browser runs a full
-  game; it shows the current player's cards and controls so you can drive a whole hand,
-  reach showdown, and watch the pushup tally — no networking needed.
+- **Hotseat dev mode:** open `index.html?solo=4` (or `?solo=2..8`). One browser runs a
+  full game (no Firebase needed) — drive a whole hand, reach showdown, watch the tally.
 - **Hand-evaluator tests:** serve the folder locally and open `tests/poker.test.html`.
-  Any static server works, e.g.:
 
   ```
   python3 -m http.server 8000
-  # then open http://localhost:8000/            (the game)
-  #      and http://localhost:8000/tests/poker.test.html   (the tests)
+  # http://localhost:8000/                          (the game)
+  # http://localhost:8000/tests/poker.test.html     (evaluator tests)
   ```
 
 ## Project layout
@@ -63,19 +93,20 @@ verbatim (no Jekyll processing).
 index.html                     entry page
 css/styles.css                 all styling
 js/main.js                     app shell: home screen, host/client/solo sessions
-js/net.js                      P2P transport (Trystero). Swap point for PeerJS.
+js/net.js                      transport over Firebase Realtime Database
+js/firebase-config.js          <-- YOU paste your Firebase project config here
 js/engine.js                   authoritative game + betting state machine (host)
 js/rules.js                    betting constants + legal-action calculator
 js/poker.js                    54-card deck, wild-joker hand evaluator
 js/ui.js                       rendering + controls
 js/store.js                    remembers your name/last code (localStorage)
-vendor/trystero-nostr.min.js vendored P2P library (no CDN)
+vendor/firebase-db.min.js      vendored Firebase SDK (app + Realtime Database), no CDN
 tests/poker.test.html          in-browser evaluator tests
 ```
 
-## Swapping the networking (optional)
+## Swapping the backend (optional)
 
 All transport lives in `js/net.js` behind a small message API
 (`sendState`/`onState`, `sendHole`/`onHole`, `sendAct`/`onAct`, `sendJoin`/`onJoin`,
-peer join/leave). To use PeerJS or another WebRTC library instead of Trystero, reimplement
-just that file — nothing else needs to change.
+peer join/leave). To use a different backend, reimplement just that file — nothing
+else changes.

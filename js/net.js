@@ -1,76 +1,112 @@
-// net.js — the ONLY file that knows about the P2P transport. Everything else
-// talks to a small message API, so swapping Trystero for PeerJS later is a
-// change confined to this file.
+// net.js — the ONLY file that knows about the transport. It now routes the game
+// through Firebase Realtime Database instead of WebRTC, so there is no direct
+// browser-to-browser connection to negotiate: every message travels through
+// Firebase's servers and simply works on any wifi/cell network (no NAT/STUN/TURN
+// problems). Firebase is free (Spark plan) and the SDK is vendored in /vendor,
+// so nothing is loaded from a CDN.
 //
-// Message channels:
+// It exposes the same small message API the rest of the app already used:
 //   'state' host -> everyone : the public game snapshot (no hidden info)
 //   'hole'  host -> one peer : that player's own two hole cards
 //   'act'   client -> host   : an action intent {type, amount?}
 //   'join'  client -> host   : {name} when a player sits down
+// plus peer join/leave presence.
 //
-// The library is vendored into /vendor, so nothing is fetched from a CDN.
+// How it maps onto Realtime Database, under /tables/<CODE>:
+//   state            single node the host keeps current; clients listen and get
+//                    the latest value immediately on join (no targeting needed).
+//   hole/<peerId>    each player's cards, written by the host, read only by that
+//                    player's own listener.
+//   acts             a queue the clients push to and the host drains.
+//   peers/<peerId>   presence (auto-removed on disconnect); carries the name.
 
-import { joinRoom, selfId } from '../vendor/trystero-nostr.min.js';
+import {
+  initializeApp, getDatabase, connectDatabaseEmulator, ref, child, onValue, set,
+  update, push, remove, onChildAdded, onChildRemoved, onChildChanged, onDisconnect,
+  serverTimestamp,
+} from '../vendor/firebase-db.min.js';
+import { firebaseConfig, emulator } from './firebase-config.js';
 
-// Namespaces this app on the shared public signaling infrastructure. The table
-// code namespaces further, so two different tables never see each other.
-const APP_ID = 'pushup-poker-v1-x7k2f9';
+// Has the user pasted a real config yet?
+export const isConfigured =
+  !!firebaseConfig && typeof firebaseConfig.databaseURL === 'string' &&
+  firebaseConfig.databaseURL.startsWith('http') && !/PASTE/i.test(firebaseConfig.databaseURL);
 
-// Public Nostr relays used only to exchange the initial WebRTC handshake (a few
-// tiny messages). Reliable and reachable on wifi and cell; no account needed.
-// Several are listed for redundancy — if some are down, the rest still work.
-const RELAY_URLS = [
-  'wss://relay.damus.io',
-  'wss://nos.lol',
-  'wss://relay.nostr.band',
-  'wss://relay.primal.net',
-  'wss://nostr.mom',
-  'wss://relay.snort.social',
-];
+let db = null;
+if (isConfigured) {
+  const app = initializeApp(firebaseConfig);
+  db = getDatabase(app);
+  if (emulator) connectDatabaseEmulator(db, emulator.host, emulator.port);
+}
 
-// Free public STUN servers (no account). Used only to discover each peer's
-// public address for the direct WebRTC connection.
-const RTC_CONFIG = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'stun:global.stun.twilio.com:3478' },
-  ],
-};
+// A stable per-session id used as this player's seat id and (for the host) the
+// table's host id.
+export const mySelfId = (() => {
+  const raw = (globalThis.crypto && crypto.randomUUID)
+    ? crypto.randomUUID().replace(/-/g, '')
+    : Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return 'p' + raw.slice(0, 14);
+})();
 
-export const mySelfId = selfId;
+// Firebase rejects `undefined`; round-tripping strips it and normalizes arrays.
+const clean = (o) => JSON.parse(JSON.stringify(o));
 
-// Open (or create) the room for `code`. Returns a handle with typed send/receive
-// helpers plus peer-presence hooks.
 export function openRoom(code) {
-  const room = joinRoom(
-    { appId: APP_ID, relayUrls: RELAY_URLS, rtcConfig: RTC_CONFIG },
-    String(code).toUpperCase(),
-  );
+  if (!isConfigured) throw new Error('firebase-not-configured');
+  const CODE = String(code).toUpperCase();
+  const base = ref(db, 'tables/' + CODE);
+  const selfId = mySelfId;
 
-  const [sendState, getState] = room.makeAction('state');
-  const [sendHole, getHole] = room.makeAction('hole');
-  const [sendAct, getAct] = room.makeAction('act');
-  const [sendJoin, getJoin] = room.makeAction('join');
+  // Announce presence; auto-clean if the tab closes/crashes.
+  const meRef = child(base, 'peers/' + selfId);
+  set(meRef, { ts: serverTimestamp(), name: null });
+  onDisconnect(meRef).remove();
+
+  const reportedJoin = new Set();
+  function maybeJoin(snap, cb) {
+    if (snap.key === selfId) return;
+    const v = snap.val();
+    if (v && v.name && !reportedJoin.has(snap.key)) {
+      reportedJoin.add(snap.key);
+      cb({ name: v.name }, snap.key);
+    }
+  }
 
   return {
     selfId,
-    // host -> all (or a specific peer if `to` is given)
-    sendState: (view, to) => sendState(view, to),
-    onState: (cb) => getState((data, peer) => cb(data, peer)),
-    // host -> one peer, private
-    sendHole: (cards, to) => sendHole(cards, to),
-    onHole: (cb) => getHole((data, peer) => cb(data, peer)),
-    // client -> host
-    sendAct: (action) => sendAct(action),
-    onAct: (cb) => getAct((data, peer) => cb(data, peer)),
-    // client -> host, on sit-down
-    sendJoin: (info) => sendJoin(info),
-    onJoin: (cb) => getJoin((data, peer) => cb(data, peer)),
+
+    // host -> everyone (the `to` arg is unused: a single live node serves all,
+    // including late joiners, automatically).
+    sendState: (view) => set(child(base, 'state'), clean(view)),
+    onState: (cb) => onValue(child(base, 'state'), (snap) => {
+      const v = snap.val(); if (v) cb(v, 'host');
+    }),
+
+    // host -> one peer, private path
+    sendHole: (cards, to) => set(child(base, 'hole/' + to), clean(cards)),
+    onHole: (cb) => onValue(child(base, 'hole/' + selfId), (snap) => {
+      const v = snap.val(); if (v) cb(v, 'host');
+    }),
+
+    // client -> host queue; host drains each message
+    sendAct: (action) => push(child(base, 'acts'), { from: selfId, action: clean(action), ts: serverTimestamp() }),
+    onAct: (cb) => onChildAdded(child(base, 'acts'), (snap) => {
+      const m = snap.val();
+      remove(snap.ref); // consume it so it isn't reprocessed
+      if (m && m.action) cb(m.action, m.from);
+    }),
+
+    // client announces its name (updates its presence node)
+    sendJoin: (info) => update(meRef, { name: (info && info.name) || 'Player', ts: serverTimestamp() }),
+    onJoin: (cb) => {
+      onChildAdded(child(base, 'peers'), (snap) => maybeJoin(snap, cb));
+      onChildChanged(child(base, 'peers'), (snap) => maybeJoin(snap, cb));
+    },
+
     // presence
-    onPeerJoin: (cb) => room.onPeerJoin(cb),
-    onPeerLeave: (cb) => room.onPeerLeave(cb),
-    peers: () => Object.keys(room.getPeers()),
-    leave: () => room.leave(),
+    onPeerJoin: (cb) => onChildAdded(child(base, 'peers'), (snap) => { if (snap.key !== selfId) cb(snap.key); }),
+    onPeerLeave: (cb) => onChildRemoved(child(base, 'peers'), (snap) => { if (snap.key !== selfId) cb(snap.key); }),
+    peers: () => [],
+    leave: () => { try { remove(meRef); } catch {} },
   };
 }

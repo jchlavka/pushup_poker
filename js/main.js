@@ -6,7 +6,7 @@
 import * as E from './engine.js';
 import { render } from './ui.js';
 import * as store from './store.js';
-import { openRoom, mySelfId } from './net.js';
+import { openRoom, mySelfId, isConfigured } from './net.js';
 import { MODE } from './rules.js';
 
 const root = document.getElementById('app');
@@ -61,11 +61,13 @@ function renderHome() {
   const getName = () => (nameEl.value.trim() || 'Player');
 
   root.querySelector('#create').addEventListener('click', () => {
+    if (!isConfigured) return showSetupNeeded();
     store.saveName(getName());
     const code = genCode();
     startHost(code, getName());
   });
   root.querySelector('#join').addEventListener('click', () => {
+    if (!isConfigured) return showSetupNeeded();
     const code = (codeEl.value.trim() || '').toUpperCase();
     if (!code) { codeEl.focus(); return; }
     store.saveName(getName());
@@ -73,6 +75,29 @@ function renderHome() {
     startClient(code, getName());
   });
   if (prefill) codeEl.focus(); else nameEl.focus();
+}
+
+function showSetupNeeded() {
+  root.innerHTML = `
+    <div class="wrap">
+      <div class="panel">
+        <h2>One-time setup needed 🔧</h2>
+        <p>To play across devices this needs a free Firebase backend (about 5 minutes,
+        once). Open <code>js/firebase-config.js</code> and paste in your Firebase project's
+        config — the full walkthrough is in the <strong>README</strong> under
+        “Set up the free Firebase backend”.</p>
+        <ol>
+          <li>Create a free project at <a href="https://console.firebase.google.com" target="_blank" rel="noopener">console.firebase.google.com</a>.</li>
+          <li>Build → <strong>Realtime Database</strong> → Create (start in test mode).</li>
+          <li>Register a <strong>Web app</strong> (the <code>&lt;/&gt;</code> icon) and copy its config.</li>
+          <li>Paste the values into <code>js/firebase-config.js</code>, commit, and push.</li>
+        </ol>
+        <p class="muted small">No account for your friends — just you, once. Want to try the
+        game logic right now without any of this? <a href="?solo=4">open hotseat dev mode</a>.</p>
+        <button id="back" class="btn ghost">Back</button>
+      </div>
+    </div>`;
+  root.querySelector('#back').addEventListener('click', renderHome);
 }
 
 // ---------- host ----------
@@ -123,7 +148,7 @@ function startHost(code, myName) {
   room.onPeerLeave((peer) => { console.log('[pushup] peer left', peer); E.setConnected(G, peer, false); broadcast(); });
 
   current = { leave: () => room.leave() };
-  draw();
+  broadcast(); // publish the lobby immediately so joiners see the table
 }
 
 // ---------- client ----------
@@ -161,7 +186,7 @@ function startClient(code, myName) {
     onLeave: () => { stopTicker(); renderHome(); },
   };
 
-  room.onState((v) => { view = v; stopTicker(); draw(); });
+  room.onState((v) => { view = E.normalizeView(v); stopTicker(); draw(); });
   room.onHole((cards) => { hole = cards; draw(); });
   room.onPeerJoin((peer) => { peers += 1; console.log('[pushup] peer joined', peer, '— announcing name'); room.sendJoin({ name: myName }); draw(); });
   room.onPeerLeave((peer) => { peers = Math.max(0, peers - 1); console.log('[pushup] peer left', peer); draw(); });

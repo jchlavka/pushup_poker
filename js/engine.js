@@ -394,4 +394,29 @@ export function publicView(G) {
   return base;
 }
 
+// Firebase Realtime Database drops empty arrays/objects, so a snapshot can
+// arrive at a client with fields like `board` or `reveal` missing. Restore the
+// expected shape before rendering so the UI never hits `undefined.map`.
+export function normalizeView(v) {
+  if (!v) return v;
+  v.players = v.players || [];
+  if (v.hand) {
+    v.hand.board = v.hand.board || [];
+    v.hand.seats = v.hand.seats || [];
+    v.hand.contributed = v.hand.contributed || {};
+    v.hand.folded = v.hand.folded || {};
+  }
+  if (v.settle) {
+    const s = v.settle;
+    s.winners = s.winners || [];
+    s.owed = s.owed || {};
+    s.scored = s.scored || [];
+    s.board = s.board || [];
+    s.reveal = s.reveal || {};
+    s.contributed = s.contributed || {};
+    s.confirmed = s.confirmed || {};
+  }
+  return v;
+}
+
 export { MODE };
